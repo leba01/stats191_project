@@ -31,19 +31,20 @@ aggGameDataWithOutliers <- do.call(rbind, gameData)
 
 aggGameData <- aggGameDataWithOutliers[-c(3067, 3920, 5130), ] #COMMENT THIS OUT TO RUN WITH OUTLIERS AKA GET COOK PLOT FROM HERE
 #aggGameData <- aggGameDataWithOutliers #only one of these two lines should be active at once
-
-scaledAggData = standardize(aggGameData)
+#aggGameData <- mutate(aggGameData, meals_prior = meals_prior^(2))
+scaledAggData <- aggGameData # standardize(aggGameData)
 #names(aggGameData)
 simpleMLR <- lm(game_score~.-id, data=scaledAggData)
 n = nrow(scaledAggData)
 scaledReduced <- lm(game_score ~.-id-year_uni, data=scaledAggData)
 summary(scaledReduced)
 anova(scaledReduced, simpleMLR) #here is pValue notifying year_uni is irrelevant
-pdf(file = "plot call to model.pdf")
+#pdf(file = "plot call to model.pdf")
 plot(scaledReduced)
-dev.off()
-#identify(scaledReduced) #this was for convenience for finding outliers
+#identify(plot(scaledReduced))
 
+#dev.off()
+#identify(scaledReduced) #this was for convenience for finding outliers
 #this is one of the ones that ethne made
 hist(aggGameData$fit_score)
 
@@ -52,7 +53,9 @@ fit = fitted(scaledReduced)
 residuals = resid(scaledReduced)
 standard_res <- rstandard(scaledReduced)
 leverage <- hatvalues(scaledReduced)
-
+temp <- plot(fit, residuals, main = "Residuals vs Fitted",
+     xlab = "Fitted Values", ylab = "Residuals")
+identify(scaledReduced$fit, scaledReduced$residuals)
 Cook = standard_res^2/3*leverage/(1-leverage) #RUN THIS WITH THE OUTLIERS IN TO SEE WHY I REMOVED (above),
 plot(1:n, Cook)                              # ALSO MANUALLY LOOK THEY MAKE NO SENSE. 100 score with zero everywhere else
 #identify(1:n, Cook) #again, for clicking on points
@@ -64,12 +67,21 @@ plot(1:n, standard_res)
   #mutate datasets
 aggDataMorning <- mutate(scaledAggData, time_game = "morning", coast = "west coast")
 aggDataEvening <- mutate(scaledAggData, time_game = "evening", coast = "east coast")
-head(aggDataMorning)
-head(scaledAggData)
-head(aggDataEvening)
+
+regFixed <- mutate(scaledAggData, per_train_before = 0.95)
+morningFixed <- mutate(aggDataMorning, per_train_before = 0.95)
+eveningFixed <-eveningFixed(aggDataEvening, per_train_before = 0.95)
+
+#normal
 playerProfiles <- split(scaledAggData, scaledAggData$id)
 playerProfilesMorning <- split(aggDataMorning, scaledAggData$id)
 playerProfilesEvening <- split(aggDataEvening, scaledAggData$id)
+
+#fixing percent training sessions
+#playerProfiles <- split(regFixed, regFixed$id)
+#playerProfilesMorning <- split(morningFixed, morningFixed$id)
+#playerProfilesEvening <- split(eveningFixed, eveningFixed$id)
+
 length(playerProfiles)
 names(scaledReduced)
 #Now run regressions and take avg
@@ -83,8 +95,8 @@ for (entry in playerProfiles) {
   predicted <- predict(scaledReduced, newdata = entry)
   #print("GOT HERE")
   avg <- mean(predicted)
-  vari <- var(predicted)
-  AvgPredicted <- append(AvgPredicted, list(list(id = i, mean = avg, var = vari)))
+  stddev <- sd(predicted)
+  AvgPredicted <- append(AvgPredicted, list(list(id = i, mean = avg, sd = stddev)))
   i <- i + 1
 }
 #print(AvgPredicted)
@@ -94,8 +106,9 @@ for (entry in playerProfilesMorning) {
   #calculate avg for morning cup
   predicted <- predict(scaledReduced, newdata = entry)
   avg <- mean(predicted)
-  vari <- var(predicted)
-  AvgPredictedMorning <- append(AvgPredictedMorning, list(list(id = i, mean = avg, var = vari)))
+  stddev <- var(predicted)
+  AvgPredictedMorning <- append(AvgPredictedMorning, list(list(id = i, mean = avg, sd = stddev)))
+  i <- i + 1
 }
 AvgPredictedMorning <- AvgPredictedMorning[order(-sapply(AvgPredictedMorning, '[[', 2))]
 i <- 1
@@ -103,17 +116,61 @@ for (entry in playerProfilesEvening) {
   #calculate avg for morning cup
   predicted <- predict(scaledReduced, newdata = entry)
   avg <- mean(predicted)
-  vari <- var(predicted)
-  AvgPredictedEvening <- append(AvgPredictedEvening, list(list(id = i, mean = avg, var = vari)))
+  stddev <- sd(predicted)
+  AvgPredictedEvening <- append(AvgPredictedEvening, list(list(id = i, mean = avg, sd = stddev)))
+  i <- i + 1
 }
 AvgPredictedEvening <- AvgPredictedEvening[order(-sapply(AvgPredictedEvening, '[[', 2))]
 i <- 1
-length(AvgPlayerPredicted)
+length(AvgPredictedEvening)
 
+#Lets find the rosters
+#Prioritize West Coast Cup aka morning team
+WestCoastRoster <- AvgPredictedMorning[1:10]
+WestCoastRosterIds <- lapply(WestCoastRoster, function(x) x$id)
+WestCoastRosterIds
+
+#Now finding best of rest for East Coast Cup
+EastPotential <- lapply(AvgPredictedEvening, function(x) {
+  if (!(x$id %in% WestCoastRosterIds)) {x}
+})
+EastPotential <- Filter(function(x) !is.null(x), EastPotential)
+EastCoastRoster <- EastPotential[1:10]
+EastCoastRosterIds <- lapply(EastCoastRoster, function(x) x$id)
+
+#Now finding best of rest for Regular Season
+RegPotential <- lapply(AvgPredicted, function(x) {
+  if (!(x$id %in% WestCoastRosterIds) && !(x$id %in% EastCoastRosterIds)) {x}
+})
+RegPotential <- Filter(function(x) !is.null(x), RegPotential)
+RegFrame <- data.frame(do.call(rbind, RegPotential))
+RegFrame$min <- as.numeric(RegFrame$mean) - (2 * as.numeric(RegFrame$sd))
+
+RegRoster <- RegPotential[1:10]
+RegRosterIds <- lapply(RegRoster, function(x) x$id)
+RegRosterTeamScoreMax <- lapply(RegRoster, function(x) x$mean)
+TeamScore <- mean(unlist(RegRosterTeamScoreMax))
+# THIS ABOVE IS FOR MAXIMIZING TEAM SCORE
+ByMinScore <- RegFrame[order(-RegFrame$min),]
+MinLossRoster <- head(ByMinScore, 10)
+MinLossIds <- MinLossRoster$id
+print(unlist(MinLossIds))
+#above this is for minimizing loss team
+
+cbind(RegRosterIds, EastCoastRosterIds, WestCoastRosterIds)
 #Now figuring out win and lose percentage
 prevSzn$diff <- prevSzn$team1_score - prevSzn$team2_score
 WinLoss <- glm(winning_team ~ diff, data = prevSzn, family = binomial(link=logit))
 summary(WinLoss)
+
+sznDiffs = list()
+for (x in sznMatchups[2:21]) {
+  diff = TeamScore - x
+  sznDiffs <- append(sznDiffs, diff)
+}
+df <- data.frame(diff = unlist(sznDiffs))
+
+predict(WinLoss, df, type="response")
 
 #Miscellaneous
 pairwise <- pairs(quant_variables, alpha = 0.5, cex = 0.1)
