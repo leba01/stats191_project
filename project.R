@@ -32,7 +32,7 @@ aggGameDataWithOutliers <- do.call(rbind, gameData)
 aggGameData <- aggGameDataWithOutliers[-c(3067, 3920, 5130), ] #COMMENT THIS OUT TO RUN WITH OUTLIERS AKA GET COOK PLOT FROM HERE
 #aggGameData <- aggGameDataWithOutliers #only one of these two lines should be active at once
 #aggGameData <- mutate(aggGameData, meals_prior = meals_prior^(2))
-scaledAggData <- aggGameData # standardize(aggGameData)
+scaledAggData <- aggGameData #standardize(aggGameData)
 #names(aggGameData)
 simpleMLR <- lm(game_score~.-id, data=scaledAggData)
 n = nrow(scaledAggData)
@@ -146,15 +146,17 @@ RegPotential <- Filter(function(x) !is.null(x), RegPotential)
 RegFrame <- data.frame(do.call(rbind, RegPotential))
 RegFrame$min <- as.numeric(RegFrame$mean) - (2 * as.numeric(RegFrame$sd))
 
-RegRoster <- RegPotential[1:10]
+RegRoster <- head(RegFrame, 10)
 RegRosterIds <- lapply(RegRoster, function(x) x$id)
-RegRosterTeamScoreMax <- lapply(RegRoster, function(x) x$mean)
+RegRosterTeamScoreMax <- lapply(list(RegRoster), function(x) x$min)
 TeamScore <- mean(unlist(RegRosterTeamScoreMax))
 # THIS ABOVE IS FOR MAXIMIZING TEAM SCORE
 ByMinScore <- RegFrame[order(-RegFrame$min),]
 MinLossRoster <- head(ByMinScore, 10)
 MinLossIds <- MinLossRoster$id
+MinLossRosterMeans <- lapply(list(MinLossRoster), function(x) x$mean)
 print(unlist(MinLossIds))
+#TeamScore <- mean(unlist(MinLossRosterMeans))
 #above this is for minimizing loss team
 
 cbind(RegRosterIds, EastCoastRosterIds, WestCoastRosterIds)
